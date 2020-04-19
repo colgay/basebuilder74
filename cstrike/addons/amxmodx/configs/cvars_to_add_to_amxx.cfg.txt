@@ -1,0 +1,72 @@
+//Save Type <0/1> nVault or MySQL (MySQL isn't working atm,
+//it may be removed because it's saving soo much that it looks
+//unreliable and slow.
+credits_savetype "0"
+
+//Save Mode <0/1/2> Save by Steam ID, IP Address, or Nickname
+credits_savemode "0"
+
+bb_give_nades "h"
+bb_buildtime "150"
+bb_preptime "30"
+bb_zombie_respawn_delay "3"
+bb_infection_respawn "5"
+bb_showmovers "1"
+bb_lockblocks "1"
+bb_lockmax "10"
+bb_colormode "1"
+bb_max_move_dist "768"
+bb_min_move_dist "32"
+bb_min_dist_set "64"
+bb_resetblocks "1"
+bb_zombie_supercut "0"
+bb_gunsmenu "1"
+
+amx_speed_mode 2
+amx_speed_glock18 0.5
+amx_speed_deagle 6
+amx_speed_usp 1
+amx_speed_p228 1
+amx_speed_fiveseven 1
+amx_speed_elite 0.1
+amx_speed_mac10 .6
+amx_speed_mp5 1
+amx_speed_p90 1
+amx_speed_tmp 1
+amx_speed_ump45 4
+amx_speed_galil .8
+amx_speed_sg552 2
+amx_speed_famas 1
+amx_speed_m4a1 1
+amx_speed_ak47 1
+amx_speed_aug 10
+amx_speed_m3 1
+amx_speed_xm1014 .5
+amx_speed_m249 .8
+amx_speed_scout .9
+amx_speed_awp 0.8
+
+amx_dmg_mode 2
+amx_dmg_glock18 1.0
+amx_dmg_deagle 3
+amx_dmg_usp 1
+amx_dmg_p228 1.2
+amx_dmg_elite 1
+amx_dmg_fiveseven 2.0
+amx_dmg_ump45 2.5
+amx_dmg_mp5 1.2
+amx_dmg_tmp 1.3
+amx_dmg_mac10 1.2
+amx_dmg_p90 1.25
+amx_dmg_ak47 .8
+amx_dmg_m4a1 .85
+amx_dmg_galil .65
+amx_dmg_famas 1
+amx_dmg_sg552 .95
+amx_dmg_aug 3.5
+amx_dmg_m3 1.2
+amx_dmg_xm1014 1
+amx_dmg_m249 .85
+amx_dmg_scout 1.5
+amx_dmg_awp 1.2
+amx_dmg_grenade 20.0
