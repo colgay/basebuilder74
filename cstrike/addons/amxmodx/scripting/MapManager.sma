@@ -7,25 +7,22 @@
 #define CURRMOD_INFO "map_currmod"
 
 new Array:g_ModPrefix;
-new Array:g_ModName;
-new Array:g_ModDesc;
-new Array:g_ModMaps;
-new Array:g_ModMapTrie;
-new Array:g_ModPlugins;
-new Array:g_ModConfigs;
+new Array:g_ModName, Array:g_ModDesc;
+new Array:g_ModMaps, Array:g_ModMapTrie;
+new Array:g_ModPlugins, Array:g_ModConfigs;
 new g_ModCount
 
-new Array:g_MapList;
-new Trie:g_MapTrie;
+new Array:g_MapList, Trie:g_MapTrie;
 new g_MapCount;
 
 new g_CurrentModId;
 new g_CurrentMap[32];
 new g_CurrentMapId;
 
-new g_Nominated[MAX_PLAYERS + 1] = {NULL, ...};
-new Array:g_Nominations;
-new g_NominationCount;
+new g_Nominated[MAX_PLAYERS+1][2];
+
+new Array:g_NominatedMods, g_NumNominatedMods;
+new Array:g_NominatedMaps, g_NumNominatedMaps;
 
 public plugin_precache()
 {
@@ -38,6 +35,9 @@ public plugin_precache()
     g_ModConfigs = ArrayCreate(1);
     g_MapList = ArrayCreate(32);
     g_MapTrie = TrieCreate();
+
+    g_NominatedMods = ArrayCreate(1);
+    g_NominatedMaps = ArrayCreate(1);
 
     FindAllMaps();
     LoadConfig();
@@ -52,7 +52,7 @@ public plugin_precache()
 
     get_mapname(g_CurrentMap, charsmax(g_CurrentMap));
 
-    g_CurrentMapId = FindArrayIndexByString(g_CurrentMap);
+    g_CurrentMapId = FindArrayIndexByString(g_MapList, g_CurrentMap);
 }
 
 public plugin_init()
@@ -87,28 +87,64 @@ public plugin_init()
     */
 }
 
+public plugin_end()
+{
+    CreatePluginFile();
+}
+
+public client_putinserver(id)
+{
+    g_Nominated[id][0] = NULL;
+    g_Nominated[id][1] = NULL;
+}
+
+public client_disconnected(id)
+{
+    UndoNominate(id, true);
+}
+
 public CmdSay(id)
 {
-	static msg[128];
+	new msg[128];
 	read_args(msg, charsmax(msg));
 	remove_quotes(msg);
 
-    static arg1[32], arg2[32];
+    new arg1[32], arg2[32];
     parse(msg, arg1, charsmax(arg1), arg2, charsmax(arg2));
 
     if (equal(arg1, "nom"))
     {
-        ShowNominateMenu(id, arg2);
+        if (strlen(arg2) < 3)
+        {
+            client_print_color(id, id, "^4[HKGSE]^1 要搵地圖嚟提名, 最少要打三隻字");
+            return PLUGIN_CONTINUE;
+        }
+
+        ShowNominateMapMenu(id, arg2);
     }
+    else if (equal(arg1, "undonom") && !arg2[0])
+    {
+        UndoNominate(id);
+    }
+    else if (strlen(arg1) >= 3 && !arg2[0])
+    {
+        new mapid = FindArrayIndexByString(g_MapList, arg1);
+        if (mapid != NULL)
+        {
+            ShowNominateModMenu(id, arg1);
+        }
+    }
+
+    return PLUGIN_CONTINUE;
 }
 
-public ShowNominateMenu(id, const match[])
+public ShowNominateMapMenu(id, const match[])
 {
     static buffer[100];
     formatex(buffer, charsmax(buffer), "提名地圖 \w%s \y", match)
 
     static mapname[32];
-    new menu = menu_create(buffer, "HandleNominateMenu");
+    new menu = menu_create(buffer, "HandleNominateMapMenu");
 
     for (new i = 0; i < g_MapCount; i++)
     {
@@ -118,7 +154,7 @@ public ShowNominateMenu(id, const match[])
         {
             if (g_CurrentMapId == i)
                 formatex(buffer, charsmax(buffer), "\d%s \y(而家玩緊)", mapname);
-            else if (g_Nominated[id] == i)
+            else if (g_Nominated[id][0] == i)
                 formatex(buffer, charsmax(buffer), "%s \y(你提名咗)", mapname);
             else if (IsMapNominated(i))
                 formatex(buffer, charsmax(buffer), "\d%s \y(人地提名咗)", mapname);
@@ -133,7 +169,7 @@ public ShowNominateMenu(id, const match[])
 	menu_display(id, menu);
 }
 
-public HandleNominateMenu(id, menu, item)
+public HandleNominateMapMenu(id, menu, item)
 {
 	if (item == MENU_EXIT)
 	{
@@ -141,30 +177,198 @@ public HandleNominateMenu(id, menu, item)
 		return;
 	}
 
-	new dummy, info[32];
+	static mapname[32], dummy;
+	menu_item_getinfo(menu, item, dummy, mapname, charsmax(mapname), _, _, dummy);
+	menu_destroy(menu);
+
+    if (CanNominateMap(id, mapname))
+    {
+        ShowNominateModMenu(id, mapname);
+    }
+}
+
+public ShowNominateModMenu(id, const mapname[])
+{
+    static buffer[100], info[48];
+    formatex(buffer, charsmax(buffer), "揀一個想喺 \w%s \y玩嘅模式 \y", mapname)
+
+    new menu = menu_create(buffer, "HandleNominateModMenu");
+
+    for (new i = 0; i < g_ModCount; i++)
+    {
+        if (!IsMapInMod(mapname, i))
+            continue;
+        
+        if (g_CurrentModId == i)
+            formatex(buffer, charsmax(buffer), "%a \y(而家玩緊)", ArrayGetStringHandle(g_ModName, i));
+        else
+            formatex(buffer, charsmax(buffer), "%a", ArrayGetStringHandle(g_ModName, i));
+        
+        formatex(info, charsmax(info), "%s %d", mapname, i);
+        menu_additem(menu, buffer, info)
+    }
+
+    formatex(info, charsmax(info), "%s random", mapname);
+    menu_additem(menu, "幫我揀", info);
+
+	menu_setprop(menu, MPROP_NUMBER_COLOR, "\y");
+	menu_display(id, menu);
+}
+
+public HandleNominateModMenu(id, menu, item)
+{
+	if (item == MENU_EXIT)
+	{
+		menu_destroy(menu);
+		return;
+	}
+
+	static info[48], dummy;
 	menu_item_getinfo(menu, item, dummy, info, charsmax(info), _, _, dummy);
 	menu_destroy(menu);
 
-    NominateMap(id, info);
+    static mapname[32], name[16]
+    parse(info, mapname, charsmax(mapname), name, charsmax(name));
+
+    new modid = NULL;
+    if (equal(name, "random"))
+    {
+        // random pick a mod
+        new Array:aMods = ArrayCreate(1);
+
+        for (new i = 0; i < g_ModCount; i++)
+        {
+            if (!IsMapInMod(mapname, i))
+                continue;
+            
+            ArrayPushCell(aMods, i);
+        }
+
+        modid = ArrayGetCell(aMods, random(ArraySize(aMods)));
+        ArrayDestroy(aMods);
+
+        client_print_color(id, id, "^4[HKGSE]^1 隨機幫你揀咗^3 %a", ArrayGetStringHandle(g_ModName, modid));
+    }
+    else
+    {
+        modid = str_to_num(name);
+    }
+
+    NominateMap(id, mapname, modid);
 }
 
-stock NominateMap(id, const mapname[])
+stock NominateMap(id, const mapname[], modid)
 {
-    if (g_Nominated[id] != NULL)
+    if (!CanNominateMap(id, mapname))
+        return 0;
+    
+    if (!IsModNominated(modid))
     {
-        client_print_color(id, id, "^4[HKGSE] ^1每人只可以提名一張地圖, 如果你要再提名過, 打 say^3 renom ^1取消之前嘅提名");
-        return;
+        ArrayPushCell(g_NominatedMods, modid);
+        g_NumNominatedMods++;
     }
 
     new mapid = FindArrayIndexByString(g_MapList, mapname);
-    if ()
+    ArrayPushCell(g_NominatedMaps, mapid);
+    g_NumNominatedMaps++;
+
+    g_Nominated[id][0] = mapid;
+    g_Nominated[id][1] = modid;
+
+    client_print_color(0, id, "^4[HKGSE]^3 %n ^1提名咗地圖^4 %s ^1(%a)", id, mapname, ArrayGetStringHandle(g_ModName, modid));
+    return 1;
+}
+
+stock UndoNominate(id, bool:dont_notice=false)
+{
+    if (g_Nominated[id][0] == NULL)
+    {
+        if (!dont_notice)
+            client_print_color(id, id, "^4[HKGSE]^1 你仲未提名過地圖, 如果想提名地圖, 打^3 nom part_of_mapname ^1(例如^3 nom dust^1)");
+        
+        return 0;
+    }
+
+    new mapid = g_Nominated[id][0];
+    new modid = g_Nominated[id][1];
+
+    g_Nominated[id][0] = NULL;
+    g_Nominated[id][1] = NULL;
+
+    new bool:hasmod = false;
+
+    for (new i = 1; i < MaxClients; i++)
+    {
+        if (!is_user_connected(i))
+            continue;
+        
+        if (g_Nominated[id][1] == modid)
+        {
+            hasmod = true;
+            break;
+        }
+    }
+
+    if (!hasmod)
+    {
+        new index = FindArrayIndexByCell(g_NominatedMods, modid);
+        ArrayDeleteItem(g_NominatedMods, index);
+        g_NumNominatedMods--;
+
+        if (!dont_notice)
+            client_print_color(0, print_team_default, "^4[HKGSE]^1 模式^3 %a ^1已經喺提名名單上移除", ArrayGetStringHandle(g_ModName, modid));
+    }
+
+    new index = FindArrayIndexByCell(g_NominatedMaps, mapid);
+    ArrayDeleteItem(g_NominatedMaps, index);
+    g_NumNominatedMaps--;
+
+    if (!dont_notice)
+        client_print_color(0, id, "^4[HKGSE]^3 %n ^1取消咗提名^4 %a", id, ArrayGetStringHandle(g_MapList, mapid));
+    
+    return 1;
+}
+
+stock bool:CanNominateMap(id, const mapname[])
+{
+    if (g_Nominated[id][0] != NULL)
+    {
+        client_print_color(id, id, "^4[HKGSE]^1 每人只可以提名一張地圖, 如果你想再提名過, 打 say^3 undonom ^1取消之前嘅提名");
+        return false;
+    }
+
+    new mapid = FindArrayIndexByString(g_MapList, mapname);
+    if (mapid == g_CurrentMapId)
+    {
+        client_print_color(id, id, "^4[HKGSE]^1 你唔可以提名而家玩緊嘅地圖");
+        return false;
+    }
+
+    if (IsMapNominated(mapid))
+    {
+        client_print_color(id, id, "^4[HKGSE]^1 呢張地圖已經俾人提名咗");
+        return false;
+    }
+
+    return true;
+}
+
+stock bool:IsModNominated(modid)
+{
+    for (new i = 0; i < g_NumNominatedMods; i++)
+    {
+        if (ArrayGetCell(g_NominatedMods, i) == modid)
+            return true;
+    }
+
+    return false;
 }
 
 stock bool:IsMapNominated(mapid)
 {
-    for (new i = 0; i < g_NominationCount; i++)
+    for (new i = 0; i < g_NumNominatedMaps; i++)
     {
-        if (ArrayGetCell(g_Nominations, i) == mapid)
+        if (ArrayGetCell(g_NominatedMaps, i) == mapid)
             return true;
     }
 
@@ -173,7 +377,7 @@ stock bool:IsMapNominated(mapid)
 
 stock CheckMod()
 {
-    static prefix[32];
+    new prefix[32];
     get_localinfo(NEXTMOD_INFO, prefix, charsmax(prefix));
 
     if (!prefix[0])
@@ -478,6 +682,7 @@ stock HandleModMaps(modid, const name[])
 
 stock ReloadMapList()
 {
+    g_MapCount = 0;
     ArrayClear(g_MapList);
     TrieClear(g_MapTrie);
 
@@ -527,7 +732,7 @@ stock RemoveMapFromMod(modid, const mapname[])
 {
     new Array:list = ArrayGetCell(g_ModMaps, modid);
 
-    static mapname[32];
+    static name[32];
     new size = ArraySize(list);
 
     for (new i = 0; i < size; i++)
@@ -593,6 +798,19 @@ stock IsMapInMod(const mapname[], modid)
     return false;
 }
 
+stock FindArrayIndexByCell(Array:which, cell)
+{
+    new size = ArraySize(which);
+
+    for (new i = 0; i < size; i++)
+    {
+        if (ArrayGetCell(which, i) == cell)
+            return i;
+    }
+
+    return NULL;
+}
+
 stock FindArrayIndexByString(Array:which, const string[])
 {
     static name[64];
@@ -606,12 +824,12 @@ stock FindArrayIndexByString(Array:which, const string[])
             return i;
     }
 
-    return -1;
+    return NULL;
 }
 
 stock CreatePluginFile()
 {
-    static prefix[32];
+    new prefix[32];
     get_localinfo(NEXTMOD_INFO, prefix, charsmax(prefix));
 
 	static basePath[100];
