@@ -44,8 +44,8 @@ public plugin_precache()
 
     if (!g_ModCount)
     {
-		set_fail_state("No mod loaded.");
-		return;
+        set_fail_state("No mod loaded.");
+        return;
     }
 
     ReloadMapList();
@@ -116,20 +116,20 @@ public CmdSay(id)
     {
         if (strlen(arg2) < 3)
         {
-            client_print_color(id, id, "^4[HKGSE]^1 要搵地圖嚟提名, 最少要打三隻字");
+            client_print_color(id, id, "^4[HKGSE]^1 想搵地圖嚟提名, 要打同地圖名相關嘅最少三隻字");
             return PLUGIN_CONTINUE;
         }
 
         ShowNominateMapMenu(id, arg2);
     }
-    else if (equal(arg1, "undonom") && !arg2[0])
+    else if (equal(arg1, "undo") && equal(arg2, "nom"))
     {
         UndoNominate(id);
     }
     else if (strlen(arg1) >= 3 && !arg2[0])
     {
         new mapid = FindArrayIndexByString(g_MapList, arg1);
-        if (mapid != NULL)
+        if (mapid != NULL && CanNominateMap(id, arg1))
         {
             ShowNominateModMenu(id, arg1);
         }
@@ -153,11 +153,7 @@ public ShowNominateMapMenu(id, const match[])
         if (!match[0] || containi(mapname, match) != -1)
         {
             if (g_CurrentMapId == i)
-                formatex(buffer, charsmax(buffer), "\d%s \y(而家玩緊)", mapname);
-            else if (g_Nominated[id][0] == i)
-                formatex(buffer, charsmax(buffer), "%s \y(你提名咗)", mapname);
-            else if (IsMapNominated(i))
-                formatex(buffer, charsmax(buffer), "\d%s \y(人地提名咗)", mapname);
+                formatex(buffer, charsmax(buffer), "\d%s \y(而家張圖)", mapname);
             else
                 formatex(buffer, charsmax(buffer), "%s", mapname);
             
@@ -192,6 +188,7 @@ public ShowNominateModMenu(id, const mapname[])
     static buffer[100], info[48];
     formatex(buffer, charsmax(buffer), "揀一個想喺 \w%s \y玩嘅模式 \y", mapname)
 
+    new lastmod = NULL;
     new menu = menu_create(buffer, "HandleNominateModMenu");
 
     for (new i = 0; i < g_ModCount; i++)
@@ -206,6 +203,16 @@ public ShowNominateModMenu(id, const mapname[])
         
         formatex(info, charsmax(info), "%s %d", mapname, i);
         menu_additem(menu, buffer, info)
+
+        lastmod = i;
+    }
+
+    if (menu_items(menu) < 2)
+    {
+        NominateMap(id, mapname, lastmod);
+
+        menu_destroy(menu);
+        return;
     }
 
     formatex(info, charsmax(info), "%s random", mapname);
@@ -259,7 +266,7 @@ public HandleNominateModMenu(id, menu, item)
 
 stock NominateMap(id, const mapname[], modid)
 {
-    if (!CanNominateMap(id, mapname))
+    if (!CanNominateMap(id, mapname) || modid == NULL)
         return 0;
     
     if (!IsModNominated(modid))
@@ -269,8 +276,11 @@ stock NominateMap(id, const mapname[], modid)
     }
 
     new mapid = FindArrayIndexByString(g_MapList, mapname);
-    ArrayPushCell(g_NominatedMaps, mapid);
-    g_NumNominatedMaps++;
+    if (!IsMapNominated(mapid))
+    {
+        ArrayPushCell(g_NominatedMaps, mapid);
+        g_NumNominatedMaps++;
+    }
 
     g_Nominated[id][0] = mapid;
     g_Nominated[id][1] = modid;
@@ -296,6 +306,7 @@ stock UndoNominate(id, bool:dont_notice=false)
     g_Nominated[id][1] = NULL;
 
     new bool:hasmod = false;
+    new bool:hasmap = false;
 
     for (new i = 1; i < MaxClients; i++)
     {
@@ -307,7 +318,18 @@ stock UndoNominate(id, bool:dont_notice=false)
             hasmod = true;
             break;
         }
+
+        if (g_Nominated[id][0] == mapid)
+        {
+            hasmap = true;
+            break;
+        }
     }
+
+    if (!dont_notice)
+        client_print_color(0, id, "^4[HKGSE]^3 %n ^1取消咗提名^4 %a ^1(%a)", id, ArrayGetStringHandle(g_MapList, mapid), ArrayGetStringHandle(g_ModName, modid));
+
+    new message[180];
 
     if (!hasmod)
     {
@@ -316,16 +338,24 @@ stock UndoNominate(id, bool:dont_notice=false)
         g_NumNominatedMods--;
 
         if (!dont_notice)
-            client_print_color(0, print_team_default, "^4[HKGSE]^1 模式^3 %a ^1已經喺提名名單上移除", ArrayGetStringHandle(g_ModName, modid));
+            formatex(message, charsmax(message), "^4 模式^3 %a", ArrayGetStringHandle(g_ModName, modid));
     }
 
-    new index = FindArrayIndexByCell(g_NominatedMaps, mapid);
-    ArrayDeleteItem(g_NominatedMaps, index);
-    g_NumNominatedMaps--;
+    if (!hasmap)
+    {
+        new index = FindArrayIndexByCell(g_NominatedMaps, mapid);
+        ArrayDeleteItem(g_NominatedMaps, index);
+        g_NumNominatedMaps--;
 
-    if (!dont_notice)
-        client_print_color(0, id, "^4[HKGSE]^3 %n ^1取消咗提名^4 %a", id, ArrayGetStringHandle(g_MapList, mapid));
-    
+        if (!dont_notice)
+            format(message, charsmax(message), "%s %s^4 地圖^3 %a", message, message[0] ? "^1同" : "", ArrayGetStringHandle(g_MapList, mapid));
+    }
+
+    if (message[0])
+    {
+        client_print_color(0, print_team_default, "%s ^1已經喺提名名單上移除", message);
+    }
+
     return 1;
 }
 
@@ -333,7 +363,7 @@ stock bool:CanNominateMap(id, const mapname[])
 {
     if (g_Nominated[id][0] != NULL)
     {
-        client_print_color(id, id, "^4[HKGSE]^1 每人只可以提名一張地圖, 如果你想再提名過, 打 say^3 undonom ^1取消之前嘅提名");
+        client_print_color(id, id, "^4[HKGSE]^1 每人只可以提名一張地圖, 如果你想再提名過, 打^3 undo nom ^1取消之前嘅提名");
         return false;
     }
 
@@ -344,13 +374,32 @@ stock bool:CanNominateMap(id, const mapname[])
         return false;
     }
 
-    if (IsMapNominated(mapid))
+    if (IsMapNominated(mapid) && !HasModToNominate(mapname))
     {
         client_print_color(id, id, "^4[HKGSE]^1 呢張地圖已經俾人提名咗");
         return false;
     }
 
     return true;
+}
+
+stock bool:HasModToNominate(const mapname[])
+{
+    new index;
+
+    for (new i = 0; i < g_ModCount; i++)
+    {
+        if (!IsMapInMod(mapname, i))
+            continue;
+        
+        index = FindArrayIndexByCell(g_NominatedMods, i);
+        if (index != NULL) // already in nominated list
+            continue;
+        
+        return true;
+    }
+
+    return false;
 }
 
 stock bool:IsModNominated(modid)
@@ -831,6 +880,9 @@ stock CreatePluginFile()
 {
     new prefix[32];
     get_localinfo(NEXTMOD_INFO, prefix, charsmax(prefix));
+
+    if (!prefix[0])
+        get_localinfo(CURRMOD_INFO, prefix, charsmax(prefix));
 
 	static basePath[100];
 	get_localinfo("amxx_configsdir", basePath, charsmax(basePath));
